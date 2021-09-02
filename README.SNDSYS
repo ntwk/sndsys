@@ -1,0 +1,494 @@
+
+
+
+       SSSSS   N     N  DDDDD     SSSSS   Y     Y   SSSSS 
+      S     S  NN    N  D    D   S     S   Y   Y   S     S 
+      S        N N   N  D     D  S          Y Y    S 
+       SSSSS   N  N  N  D     D   SSSSS      Y      SSSSS 
+	    S  N   N N  D     D        S     Y           S 
+      S     S  N    NN  D    D   S     S     Y     S     S 
+       SSSSS   N     N  DDDDD     SSSSS      Y      SSSSS 
+
+
+
+    0.  Warning
+
+If you are new to sndsys, and are not a hacker, you are probably  looking
+for the tutorial rather than this readme.  You generate it by typing "make tut"
+into your shell in the sndsys directory to generate it in dvi format or "make
+pdftut" in pdf format.  It is also on the web at www.volkerschatz.com/noise.
+On the other hand, if you have read the tutorial (or perhaps not) and are
+curious how sndsys works, you have come to the right place.  Read on.
+
+
+    1.  Intro
+
+This smallish project was conceived to allow me to create music on my computer
+with maximum flexibility and minimum hassle.  It was to some extent inspired by
+the sound compiler Sapphire (see www.pale.org) and shares its basic principles.
+After playing around with Sapphire, I found it wanting in several respects:
+Processing multiple channels is awkward, the parser behaved erratically on my
+system for an unknown reason, and I didn't like the distinction between
+objects, oscillators, instruments and scores, and some other basic elements.
+However, if you just want to play simple melodies and/or create single sound
+samples without investing too much time learning how to do it, I can recommend
+Sapphire.  As you are going to see shortly, sndsys is something else again.
+
+Oh, and another thing...  The spelling's not wrong, just British.
+
+
+    2.  Mental health hazard warning
+
+Since I am not a professional software developer, I do not believe, like many
+of them, that software is more intelligent than its users.  Consequently, there
+is plenty of scope for you to use sndsys in a way that will get you nowhere, or
+to the edge of sanity.  On the plus side, for the same reason, mental wear and
+tear is reduced by the fact that there are hardly any error messages in sndsys,
+just warnings - which should be taken seriously.  When faced with a choice
+between aborting with an error and continuing in a way that would leave
+unrelated parts unaffected, I opted for the latter - a practice which some
+would call "Russian improvisation" (no offence).  In brief: sndsys assumes you
+know what you are doing.
+
+
+    3.  Basics
+
+sndsys is a system for processing streams of floating-point numbers, which I
+happen to use for digitised sound.  You are free to use it for tracking the
+stock market, as a pocket calculator, or for processing data of high-energy
+physics experiments.
+
+Float numbers are passed between objects processing them in the order
+prescribed by the user.  Unlike in Sapphire, there is no central authority
+which shifts the data and calls the objects' functions.  Instead, the process
+is demand-driven.  Each processing object calls the processing functions of its
+inputs (which are themselves objects) whenever it needs the data they can
+provide.
+
+It is not necessary for all objects to be in sync.  A simple delay object can
+be written which does not call its input until the delay time has elapsed, and
+then just passes the values through.  There is no reason why the delay should
+have to be positive: By reading and discarding a number of initial values, the
+delay object can read ahead.  This object is called cdelay (defined in
+sndmisc.c).
+
+It is equally easy to write a resampling object.  It just has to read more or
+fewer than one value from its input (on average) for each value it outputs and
+interpolate the values in a suitable way.  This object is called resample and
+is defined in sndasync.c.
+
+There is an important difference between these two examples: The delay object's
+input will drift out of sync while the delay is created but eventually
+re-synchronise with a fixed delay compared to a signal which is not delayed.
+The input of the resampler, however, will have a constantly growing phase
+difference with respect to an undelayed signal.  I will call the latter type of
+object "asynchronous" in this text and in the comments in the source code.
+Since special care has to be taken when using asynchronous objects, most (all?)
+of them are defined in the source file sndasync.c.
+
+Since I was dissatisfied with yacc-based parser of Sapphire and too lazy to
+write one myself, I decided to make use of the C compiler instead.  To tell
+sndsys what to do, you write a C program containing functions representing
+objects, that is returning pointers to sndobj structs.  An internal function,
+newsndo, which has to be called by all object-creating functions, registers all
+the objects in a central list where the can be kept track of.  newsndo is akin
+to a parent class constructor in C++ (though I am reliably informed that the
+sort of approach sndsys uses is not called object-oriented, just object-based
+;), see http://www.parashift.com/c++-faq-lite/).  One can of course also
+declare pointers to sndobj structs and assign a returned pointer to them.  By
+passing such a pointer variable as an input to several other objects, the
+signal can be fanned out.
+
+After building a tree (or more complicated structure, see below) of sndobjs,
+you pass the (pointer to the) top object to the function sndexecute, which
+loops the top processing function for a certain time.  Note that the return
+values are discarded.  Writing the sound to a file or playing it on the speaker
+is done by an object (usually the top-level one), not the system.  (By the way,
+output objects (defined in sndsink.c) should nevertheless pass through the
+values they read, so that they can be used to "listen in" at some point in the
+processing chain.)
+
+Score readers are ordinary objects with no additional magic.  There are two
+implemented at the moment.  One parses the abc language (see
+http://staffweb.cms.gre.ac.uk/~c.walshaw/abc/) and outputs the cue, volume and
+frequency/ies.  The other, called xyz as a pun on abc, is more versatile, see
+the source code for its description.  Instruments also are ordinary objects,
+which happen to process their input in a way that resembles a human playing
+sheet music.
+
+Some more features in brief:
+
+- signals can have PLENTY of channels (which is defined in sndsys.h)
+- complex objects can easily be created by writing functions (or preprocessor
+  macros) which return a hierarchy of other objects
+- an automatic buffering mechanism (see below) reconciles the demand-driven
+  data passing with fanout, delays and read-ahead, and backfeed loops 
+  (for FIR filters or musical instrument simulation)
+- and of course there are already a significant number of sndobjs, some
+  designed by me, others pilfered indiscriminately from Sapphire, snd (a
+  graphical sound editor, see http://www-ccrma.stanford.edu/) and Julius O.
+  Smith's homepage (http://ccrma.stanford.edu/~jos/).
+
+Whaddayamean, you expected some simple explanations under the heading "Basics"?
+Life is not like that!
+
+
+    4.  Using sound objects
+
+Sound objects are created by calling the function which has the same name as
+the type of object.  It will return a sndobj *, which is all you need to use
+such an object.  Many sound objects take pointers to other sound objects as
+parameters, and some also take numerical parameter arguments.  Unlike Sapphire,
+sndsys distinguishes between parameters (which have to be constants) and
+constant inputs (which are inputs which the user happens to choose as
+constants).  Therefore there is a sound object called c(<number>) which always
+outputs the number.  It is doubtless the most important type of object.  For
+instance, using the object type "sine", you can generate a 440 Hz sine wave of
+amplitude 1 with the following C code:
+
+sndobj *sin= sine(0.0, c(440), c(1.0));
+
+Note that the first argument (the initial phase of the sine) is a numerical
+parameter which cannot change and not a sndobj* and is therefore given without
+c(..).  If you fail to observe this distinction, you will get compiler errors
+like "Cannot convert integer to pointer / pointer to double".
+
+Generating a sine and calling sndexecute() is not enough, however.  To make
+sndsys as flexible as possible, output of the resulting waveform is not done by
+sndexecute or any other part of the "sound system", but also by a sound object.
+The object for writing the waveform to a .wav file is called writeout.  It
+takes the file name and the input signal as its arguments.  So to create a sine
+wave and write it out to a file, you would have to compile the following little
+program:
+
+#include "sndsys.h"
+
+int main(int argc, char** argv)
+{
+  sndexecute(0.0, 2.0, writeout("sine440.wav", sine(0.0, c(440), c(1.0))));
+  return 0;
+}
+
+The first two arguments of sndexecute are the start and stop time of execution.
+Some objects in sndcron.c use the start time to skip initial events, but
+otherwise only the difference is important, which gives the duration.  You
+could also play the sine wave on your speaker using the object oss, but it is
+somewhat low-level and therefore may not work with your sound card without
+modification.
+
+If you want to use the same combination of sound objects frequently, you don't
+want to type or copy&paste it every time.  There are two ways to reuse
+hierarchies of objects: copying the pointer or duplicating the hierarchy.  The
+latter is done by writing a function (or a macro, if you prefer) which creates
+the sound objects you need.  Unlike the C compiler, sndsys does not care
+whether you write a function or a macro - since new objects are created by
+functions and macros alike, both duplicate something and in this sense
+correspond to preprocessor macros in C.  The other possibility, which
+corresponds to C functions, is storing the pointer to a sound object in a
+variable and using it as inputs for different other objects.  The object
+hierarchy is not duplicated, only its results are read several times.  Since
+some book-keeping is required to ensure that every object which has this one as
+an input reads every value exactly once, this option is slower.  However,
+object hierarchies for complex sounds may be very large.  Besides, if you write
+a sound object which needs its input in several places, you cannot duplicate
+the input since you haven't created it yourself.  If you create a backfeed loop
+by using a sound object as its own input, duplicating the hierarchy also will
+not do.  And when you process a signal with a random element, it may make a
+large difference whether you actually reuse the same signal or create another
+one which is statistically the same but not identical.  So both approaches have
+their applications.
+
+If you reuse the same sound object, you have to create fanout objects which
+handle the necessary bookkeeping.  This is done by the function makefanouts()
+which is called by sndexecute.  You only need to call it by hand if you don't
+use sndexecute.  Another sensible function called by sndexecute is prune()
+which destroys unused sound objects and prints out a warning if there were any.
+It has to be called before makefanouts().  Some sound objects rely on this
+function being called and just return c(0) if an error occurred and don't
+destroy themselves.  You can print out a list of existing sound objects with
+dumpchain() and the hierarchy of objects with dumptree().
+
+To get used to using sound objects, it is best to play around a bit.  You can
+get a list of all types of sound object by typing "grep '^sndobj *\*' sndsys.h"
+in a terminal and a description of each of them with the perl script
+objectdoc.pl.  Besides you can look at the source code of the example programs
+which are listed as targets in the Makefile.
+
+
+    5.  Writing sound objects
+
+To add functionality to sndsys, one can easily write additional sound objects.
+The simplest new object is one that is just a combination of existing ones.
+The objects flanger and leslie in sndeff.c are examples of that.  Only one C
+function has to be written, which builds the hierarchy of objects using its
+inputs and parameters and returns a pointer to the top object.
+
+To create a completely different object, one has to create and initialise a
+sndobj struct.  This is preferably done by calling the function newsndo().  It
+takes as its arguments the calc function, the name and type, the number of
+output channels and of inputs and pointers to the sound objects used as inputs.
+It creates a sndobj struct, initialises it accordingly and inserts it into the
+global list of sound objects.  The type of the object is a string which should
+be the same as the name of the function representing it.  The name is a way of
+distinguishing several objects of the same type.  However, it is often left to
+the user to set it to a truly unique name.  It is usually initialised to the
+same string as the type or to a string depending on the names of the inputs
+and/or on parameters.
+
+The calc function of a sound object is called every time a new output value is
+needed.  It gets passed a pointer to the sndobj struct, a pointer to the
+caller's sndobj struct and the number of the input of the caller as which it is
+called.  (This convoluted formulation is necessary because our sound object may
+actually be several different inputs of the caller.)  However, all except a few
+very special sound objects use only the first argument, the pointer to their
+own struct.  The calc function then computes the output values from its inputs
+and returns the first channel of its output.  Macros are provided for getting
+input values and setting output values: INCALC must be called exactly once for
+each input to maintain syncronisation since it calls the input's calc function.
+(An exception are asyncronous sound objects which are not really recommended to
+be written except in self-defence.)  If an input value is needed again, it can
+be obtained with INPUT.  INPUTC gets you the channel of your choice for
+multi-channel inputs.  Its first argument is the number of the input, the
+second the channel.  Output values are set with OUTPUT(channel, value).  If you
+write multi-channel objects, the macro FORCH may be useful, which is a for loop
+over all channels which requires the variable ch to be declared.  The macro
+CALCRETURN returns the first channel of the output values set with OUTPUT.
+
+With what we have learned so far, a simple two-input adder can be written:
+
+sndobj *add2(int n, sndobj *in1, sndobj *in2)
+{
+  return newsndo(calcadd2, "add2", "add2", 
+		    in1->nch < in2->nch? in1->nch : in2->nch,
+		    2, in1, in2);
+}
+
+float calcadd2(sndobj *me, sndobj *caller, int innr)
+{
+  int ch;	// <-- necessary for FORCH
+
+  INCALC(0);	// make inputs compute input values
+  INCALC(1);
+  FORCH
+    OUTPUT(ch, INPUTC(0, ch) + INPUTC(1, ch));
+  CALCRETURN;
+}
+
+Most sound objects will not be completely defined by their calc function and
+their sndobj struct, but will need additional storage for parameters of their
+own.  For that purpose, the sndobj struct contains PLENTY of private pointers.
+By convention, the private struct of a sound object has the same name as the
+object.  There are macros which facilitate allocating storage: new(<type>)
+(similar to C++) and news(<type>, <number>) (the plural of new ;)).  All
+private pointers are freed automatically when the sound object is destroyed.
+Therefore they must point to chunks of memory allocated with malloc or new.
+You may already have noticed that sndsys is a world of PLENTY: To keep down
+the number of preprocessor constants, a sound object can have PLENTY of inputs,
+PLENTY of channels and PLENTY of private storage.
+
+Many filters need more than just one input value for computing each output
+value.  Delay objects need the value of an input after a certain delay or even
+in advance.  Both of these tasks are performed behind the scenes by sndsys'
+sophisticated buffering mechanism which will be described in the next section.
+When writing sound objects, the only thing of interest is what a sound object
+is allowed to do with its inputs.  As has been mentioned above, it is indeed
+possible to write a simple delay object which starts evaluating its input only
+after a certain delay and then carries on syncronously (which contradicts my
+simplified statement a few paragraphs ago that a sound object has to evaluate
+its inputs exactly once for every call of its calc function).  But because the
+input may simultaneously serve as an input to a different sound object which is
+in sync all the time, or even out of sync in the opposite direction, the amount
+it is allowed to be out of sync is limited by the size of the buffer which is
+inserted automatically in such situations.  The maximum time out of sync is
+HORIZON (in seconds).
+
+A totally different approach has to be taken if a sound objects needs both past
+and present values of an input to calculate its output.  This is provided by
+"buffered" inputs.  An input is made buffered by calling the function buf().
+But let's first look at how it is used.  The conventional input evaluation
+macro INCALC may not be used with buffered inputs.  Instead, BUFINCALC must be
+used to make the buffer provide the values, which can then be read with INPUT
+or INPUTC.  BUFINCALC takes (in addition to the input number) an index and a
+fraction as its argument.  The index is a buffer index relative to the current
+read position, that is minus the delay in sample values.  If the fraction is
+non-zero, linear interpolation is performed to obtain the value at
+index+fraction.  The fraction must be in [0, 1).  The current read position is
+advanced by the macro BUFINCR.  It cannot be moved backwards.  This should be
+called once with argument 1 every time the sound object's calc function is
+called - unless it wants to be out of sync.  This leads us back to the buf()
+function which makes an input buffered.  Its first three arguments are the
+maximum delay, the maximum read-ahead and the maximum time out of sync (all in
+seconds).  The other three arguments are the number of channels to buffer
+(possibly not all of them), the client sound object which is asking for
+buffering and its input number for the input to be buffered.
+
+So in brief here are the rules of engagement between sound objects and their
+inputs: A non-buffered input can be read only at the current position but may
+be out of sync by up to HORIZON.  The current position is automatically
+advanced by one by requesting the next value with INCALC.  A buffered input may
+be read with an offset to the current position according to the first two
+arguments to buf() but may not be out of sync unless the third argument of
+buf() was given accordingly, not even by HORIZON.  BUFINCR must be called
+frequently enough that the current position does not get out of sync too much.
+
+There is another advanced feature which authors of new sound objects have to be
+aware of.  If the value a sound object would compute would not actually be
+needed (for instance because a sound has just been faded out further
+downstream), it can be "skipped".  Then its skip function is called instead of
+its calc function.  The skip function hopefully keeps up syncronisation but
+refrains from any CPU-intensive computations which the calc function may do.
+The default skip function set by newsndo() is skipinputs() (defined in
+sndsys.c).  skipinputs() just calls the skip functions of all inputs, which is
+a sensible choice in many cases.  If some private variables have to be kept up
+to date (such as a time variable or a countdown), the creator of a new sound
+object has to write its own skip function.  It takes the same arguments as
+calc() but has no return value.  It is important to know how to handle the
+inputs: For non-buffered inputs, the macro INSKIP should be called, whereas for
+buffered inputs, BUFINCR should be used.  The allowed time out of sync for
+calculations applies equally for skipping.  For the cases where it is quite
+impossible to skip a calculation, the function dontskip() is defined in
+sndsys.c.  It calls the calc function and discards its return value.
+
+Finally, an exit function may be defined for a sound object.  It is called
+before the object is deallocated.  It is rarely used, for instance by the
+writeout object to write the length of the wav file into the header and by the
+oss and mike objects to close the dsp device.
+
+
+    6.  Buffering, skipping and loops
+
+It has already been mentioned that sndsys allows a signal to be used as an
+input in several places, even if the sound objects down the processing chain
+maintain different delays of the input signal and if some of them need to
+access several values each time.  This is achieved by special sound objects
+handling the buffering which are inserted by the function makefanouts().  Let's
+call these objects fanouts in this context even though they are the same as the
+buffers created with buf().
+
+Fanouts have a ring buffer from which all its clients (the sound objects which
+have the same signal, the fanout's input, as their input) can read and which is
+filled on demand.  Its calc function uses all its second and third argument,
+the pointer to the calling sound object and its input number, to keep track of
+which values still may be read by a client and which will no longer be needed.
+The input number is necessary for this bookkeeping since a signal may serve as
+several inputs of the same object, which also requires a fanout.  (Therefore,
+strictly a client really is an object - input number combination, not just an
+object.)
+
+So far, so straightforward.  A ring buffer is filled as needed and read by all
+clients.  (By the way, buffer over/underruns are not guarded against.  The
+designer of the offending sound object has to take care of those.)  Where it
+gets interesting is in combination with the possibility of skipping unneeded
+input values.  Of course, some clients may skip a signal, while others may want
+to read it.  So the input of a fanout is skipped only when all its clients have
+skipped so many times that a value which has not yet been written to the buffer
+cannot possibly be read by any of them.  If the client has the input as a
+buffered input (let's call this a buffering client), this means that it has to
+skip at least the number of sample values corresponding to its maximal delay.
+During this process, the fanout lets the write position drop back until it hits
+the ground and the input can be skipped.
+
+When one of the clients starts reading again, a number of values is read until
+the write position reaches its read position.  Even if it is a non-buffering
+client, these values cannot be skipped since a buffered client may start
+reading coincidentally and input values can only be read in order.
+
+Another feature which saved me from boredom until I was done with it is the
+possibility to create backfeed loops, that is a set of sound objects of which
+one ultimately reprocesses its output as an input (after it may have passed
+through many other objects).  A loop requires a fanout because the signal has
+to go both back through the loop and on downstream.  (If it doesn't go on to
+another object, it is quite useless and will be removed by prune().)  A loop
+only makes sense for a buffered or generally delayed input (causality...).  If
+an object tries to read its own future, an infinite loop is prevented but the
+return value is undefined.
+
+You create a loop with the two pseudo-objects loop and defloop.  They take a
+name string and an id number as arguments, the combination of which identifies
+the loop.  (The number is there to facilitate serial production of loops for a
+certain type of sound object.  It's a nuisance to increment a string.)  There
+may be several loop's with the same name and id, but only one defloop.  These
+pseudo-objects are removed by the function closeloops(), which redirects the
+inputs which are loops to the input of the defloop.  Since a fanout has to be
+created, makefanouts() has to be called after that.  sndexecute calls
+closeloops() (and makefanouts()) automatically.
+
+Now where it gets really interesting (in case your head isn't spinning yet) is
+when you combine feedback loops with skipping.  If an object is directly or
+indirectly its own input, you can't wait for all the fanout's clients to skip
+it since the client which is part of the loop can only skip the fanout if the
+fanout skips its input.  (Read the last sentence again.  It makes sense, that
+is not the problem.)  A further problem is that sndsys cannot know the
+effective decay constant of the loop, which will usually depend on the data in
+the loop and the parameter inputs fed into objects which are part of the loop
+from outside.  Therefore there is no way of determining whether data which
+would have to be calculated now and could be skipped might not be needed later
+on.  For that reason, loops are never skipped.  This is a pity as it reduces
+the gain in computation time resulting from skipping.
+
+The fanout-related code handling loops is now probably 100% correct, after
+some ruthless bug-hunts and several rewrites.  Some sound objects' skip()
+functions, on the other hand, may not be.  In particular, the default skip
+function skipinputs() may not be right for all objects which do not implement a
+skip() function of their own.  If you suspect that a strange effect may be
+caused by a bug related to skipping, call disableskip() before sndexecute().
+It replaces all objects' skip functions with dontskip().
+
+
+    7.  Odds'n ends
+
+There are some functions in the main part of sndsys which may be useful for
+several sound objects and were therefore centralised.  The function lininterpol
+performs linear interpolation of a float array.  It is passed the pointer to
+the array, its size and a floating-point position at which the value should be
+interpolated.  The position need not be in the range [0, size).  The linear
+interpolation wraps around, that is a position of -0.5 gives you the average of
+the first and last value.
+
+Three functions are provided for objects which need random numbers.  makerng
+returns a pointer to a struct containing an initialised state array for a
+random number generator.  It is large enough (256 bytes) to produce
+pseudo-random numbers with a large period which give good-sounding white noise.
+The rngdesc struct has to be freed by the caller (usually done by storing its
+pointer in one of the private pointers of the sound object).  To obtain random
+numbers, one calls one of the functions flatrng or gaussrng.  The former
+returns uniformly distributed random numbers between -1 and 1.  gaussrng
+returns random numbers with a gaussian distribution around 0 with a mean
+deviation of 1.
+
+For some filters, for instance for reverberators, it is necessary to choose
+delays which are relatively prime (do not have common factors).  Prime numbers
+(which never have common factors) are returned by the function getprime.  It is
+passed a lower limit and returns a prime greater than or equal to it.  It uses
+a simple algorithm, the sieve of Eratosthenes, but is quite fast in the range
+of delays required since it uses a table of all primes between 0 and 1000.
+
+Lastly, there is a way for sound objects to share (memory) storage space.  The
+procedure for this is to build a string which uniquely identifies what is to be
+stored, to call findshared() to find out whether the data already exist and to
+call registershared() if the shared buffer is newly created.  If the buffer
+address is assigned to a private pointer, it is automatically deregistered when
+the sound object is destroyed and not deallocated until the last user is
+deregistered.  This is ensured by freeshared(), which is called by killsndo()
+and killemall() before deallocating non-shared private storage.
+
+findshared() takes two arguments, the id string and a boolean integer.  The
+second argument is usually passed as 1, which means that the caller is
+automatically registered as a new user of the shared structure if it exists.
+In that case, the caller must free the memory in which the string is stored.
+Otherwise it must not free it; it will then be deallocated along with the
+shared storage space itself.  This shared storage mechanism is currently only
+used by the object types file, multiwave and score to avoid keeping multiple
+copies of a file in memory.
+
+
+    8.  Example programs
+
+Here is a very brief description of the example programs:
+
+piano - keyboard piano.  Shift or Caps Lock work like piano pedal
+distort - distorts the microphone input and outputs it on the speaker
+vrec - records sound from the microphone, sound-activated
+model - plucks a string once using the Karplus-Strong plucked-string algorithm
+melody2 - plays a small melody on a distorted Karplus-Strong string
+
